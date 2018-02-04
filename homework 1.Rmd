@@ -8,6 +8,7 @@ output:
 ```{r}
 library(CVXR)
 library(leaps)
+library(ggplot2)
 ```
 **Ex 1.**
 1.
@@ -228,6 +229,24 @@ rownames(table)[2:9] <- colnames(data)[1:8]
 table
 ```
 
-
+**Ridge**
+```{r}
+find_l <- function(lambda, Y, X){
+Xtraincen <- X-mean(Xtrain)
+br <- solve(t(Xtraincen) %*% Xtraincen + diag(x = lambda, ncol(Xtraincen)), t(Xtraincen) %*% (Y - mean(Y)))
+br <- rbind(mean(Y),br)
+br
+}
+Xtestone <- cbind(array(1, dim = c(nrow(Xtest),1)), Xtest)
+find_l(24, Ytrain, Xtrain)
+mse <- vector()
+for (lambda in 1:50) {
+  mse[lambda] <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
+}
+datf <- as.data.frame(cbind(c(1:50),mse))
+colnames(datf)[1]<-'x'
+pl <- ggplot(datf, aes(x,mse)) + geom_line()
+pl
+```
 
 
