@@ -1,0 +1,480 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(CVXR)
+library(leaps)
+```
+**Ex 1.**
+1.
+a) Reading in the data
+```{r}
+data <- read.table("http://statweb.stanford.edu/~tibs/ElemStatLearn.1stEd/datasets/prostate.data", sep = "")
+```
+
+```{r}
+data[32,2] = 3.8044  # strange science 
+```
+b) Extract and normalize the explicative variables
+```{r}
+X <- scale(data[,1:8])
+```
+c) Is it wise to normalize these data?
+d)Extract the target variable
+```{r}
+Y <- as.matrix(data[,"lpsa"])
+```
+
+e) Split the dataset into training and test data
+```{r}
+Xtrain <- X[data[["train"]], ]
+Ytrain <- Y[data[["train"]], ]
+
+Xtest <- X[!data[["train"]], ]
+Ytest <- Y[!data[["train"]], ]
+```
+
+**2. Compute the correlations of predictors in the prostate cancer data as presented Table 3.1**
+```{r}
+Xtrainscale <- scale(Xtrain)
+C <- cov(as.matrix(Xtrainscale))
+```
+3. Reproduce the results presented Table 3.2
+a) Compute the coefficients of the linear regression model, without using the lm function (but you can use it validate your code)
+```{r}
+Xtrainone <- cbind(array(1, dim = c(nrow(Xtrain),1)), Xtrain)
+b <- solve(t(Xtrainone) %*% Xtrainone, t(Xtrainone) %*% Ytrain)
+```
+Now we produce the linear regression model to compare
+```{r}
+lm0 <- lm(Ytrain ~Xtrain)
+comp <-cbind(b,lm0$coefficients)
+```
+
+b) Compute the prediction error
+```{r}
+Ypred <- Xtrainone %*% b
+err <- Ytrain - Ypred
+```
+c) Compute the standard error for each variable
+```{r}
+sig2 <- (t(err) %*% err)/ (nrow(Xtrainone) - ncol(X) -1)
+v <- diag(solve(t(Xtrainone) %*% Xtrainone))
+stderr <- sqrt(as.vector(sig2)) * sqrt(v)
+```
+d) compute the Z score for each variable
+```{r}
+Z <- b/stderr
+```
+e) visualize the results and compare with table 3.2
+```{r}
+table32 <- cbind(b,stderr,Z)
+round(100*table32)/100
+```
+
+
+**Ex 2.**
+Reproduce Table 3.3, at least the first four columns that is LS, Best Subset, Ridge and Lasso.
+
+**LS column**
+```{r}
+# CVXR: An R Package for Disciplined Convex Optimization
+# check if the package works
+p <- 9
+betaHat <- Variable(p)
+objective <- Minimize(sum((Ytrain  - Xtrainone %*% betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+bo <- round(result$getValue(betaHat), 3)
+cbind((round(1000*bo)/1000),(round(1000*b)/1000))
+```
+
+
+**Best subset column**
+```{r}
+df <- as.data.frame(cbind(Xtrain,Ytrain))
+best.subset <- regsubsets(Ytrain~., df)
+best.subset.summary <- summary(best.subset)
+best.subset.summary$outmat
+```
+Since we already know that we only need two explanatory variables we use 'lcavol' and 'lweight' according to the table since they have the stars in the second row.
+
+Just to be sure we should only use two explanatory variables we can check some information criteria.
+
+In the end we choose the Bayesian Information Criterion and indeed we can see below that we only need two explanatory variables since it minimizes the BIC.
+The adjusted R^2 shows us that it is maximized when we choose 7 variables and explains 66% of the variance, if we choose only 2 explanatory variables we explain roughly 60% of the variance with the benefit of a lot less complexity due to only having 2 variables hence we choose 2 variables as the best subset model.
+Lastly looking at Mallow's CP since we use LS once we found the best variables, here we also see that it defines the best subset model as the one containing 7 explanatory variables. But since we have 8 parameters in the full model we can say that there was a sampling error and hence we disregard this.
+
+```{r}
+best.subset.by.bic <- which.min(best.subset.summary$bic)
+best.subset.by.cp <- which.min(best.subset.summary$cp)
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)
+
+par(mfrow=c(2,2))
+plot(best.subset$rss, xlab="Number of Variables", ylab="RSS", type="l")
+plot(best.subset.summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq", type="l")
+points(best.subset.by.adjr2, best.subset.summary$adjr2[best.subset.by.adjr2], col="red", cex =2, pch =20)
+plot(best.subset.summary$bic, xlab="Number of Variables", ylab="BIC", type="l")
+points(best.subset.by.bic, best.subset.summary$bic[best.subset.by.bic], col="red", cex =2, pch =20)
+plot(best.subset.summary$cp, xlab="Number of Variables", ylab="CP", type="l")
+points(best.subset.by.cp, best.subset.summary$cp[best.subset.by.cp], col="red", cex =2, pch =20)
+
+```
+Next we use the same method employed during the LS model to find our coefficients only this time we use just the two explanatory variables the best subset model gave us.
+```{r}
+b2 <-lm(Ytrain~Xtrain[,1]+Xtrain[,2], data=df)
+```
+
+```{r}
+p <- 3
+betaHat <- Variable(p)
+Xtrainone <- Xtrainone[,1:3]
+objective <- Minimize(sum((Ytrain  - Xtrainone %*% betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+bb <- result$getValue(betaHat)
+
+lm1 <- lm(Ytrain ~Xtrain[,1:2])
+comp <-cbind(bb,lm1$coefficients)
+round(1000*comp)/1000
+bb <- round(rbind(bb, 0, 0, 0, 0, 0, 0),3)
+```
+
+**The Lasso**
+```{r}
+Xtrainscale <- scale(Xtrain)
+
+t <-  .7015
+ys = scale(Ytrain)
+betaHat <- Variable(dim(Xtrainscale)[2])
+objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2))
+constraint <- list(sum(abs(betaHat)) <=  t)
+problem <- Problem(objective, constraint)
+result <- solve(problem)
+
+d <- sqrt(diag(var(Xtrain)))
+bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
+bl <- round(rbind(mean(Ytrain),bl),3)
+
+```
+
+
+**Ridge column**
+```{r}
+br <- solve(t(Xtrain) %*% Xtrain + diag(x = 24, ncol(Xtrain)), t(Xtrain) %*% (Ytrain - mean(Ytrain)))
+br <- rbind(mean(Ytrain),br)
+br <- round(br,3)
+```
+
+
+```{r}
+#ridge
+br
+#LS
+bo
+#lasso
+bl
+#Best subset
+bb
+table <- cbind(bo,bb,br,bl)
+table
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# error calculation
+```{r}
+error <- function(hat){
+  # We need to add the intercept, not multiply it
+  # Testing error
+  Yhattest <- hat[-1] %*% t(Xtest) + hat[1]
+  testError <- sum((Ytest - Yhattest)^2)/dim(Xtest)[1]
+  # Training error
+  Yhattrain <- hat[-1] %*% t(Xtrain) + hat[1]
+  trainError <- sum((Ytrain - Yhattrain)^2)/dim(Xtrain)[1]
+  
+  cbind(testError, trainError)
+}
+```
+
+
+
+
+
+
+
+
+
+```{r}
+br <- solve(t(Xtrain) %*% Xtrain + diag(x = 24, ncol(Xtrain)), t(Xtrain) %*% (Ytrain - mean(Ytrain)))
+br <- rbind(mean(Ytrain), br)
+round(br,3)
+
+Ridge <- round(1000*ridge(24))/1000
+Ridge
+```
+
+```{r}
+# The Ridge
+ridge <- function(lambda){
+  br <- solve(t(Xtrain) %*% Xtrain + diag(x = lambda, ncol(Xtrain)), t(Xtrain) %*% (Ytrain - mean(Ytrain)))
+  br <- rbind(mean(Ytrain), br)
+  br
+}
+
+Ridge <- round(1000*ridge(24))/1000
+Ridge
+```
+
+
+```{r}
+p <- 9
+lambda <- 24
+ys = scale(Ytrain)
+betaHat <- Variable(p-1)
+objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2) + lambda*sum((betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+
+d <- sqrt(diag(var(Xtrain)))
+br <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
+round(1000*br)/1000
+```
+
+
+
+```{r}
+# The Ridge
+#t <-  .7015
+t <- 0.253
+ys = scale(Ytrain)
+betaHat <- Variable(p-1)
+objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2))
+constraint <- list(sum((betaHat)^2) <=  t)
+problem <- Problem(objective, constraint)
+result <- solve(problem)
+d <- sqrt(diag(var(Xtrain)))
+bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
+round(1000*bl)/1000
+```
+```{r}
+Xa = X(ind,:)
+Xc = Xa - ones(na,1)*mean(Xa)
+intercept = mean(Ypred)
+yc = Ypred-mean(Ypred)
+
+Id = eye(8)
+lam = 24
+bl = (Xc'*Xc+lam*Id)\(Xc'*yc)
+
+df = trace(Xc*(inv(Xc'*Xc+lam*Id))*Xc')
+
+br = [intercept ; bl]
+```
+
+```{r}
+#intercept of the ridge column
+mean(Ypred)
+```
+
+**Lasso column**
+```{r}
+# The Lasso
+t <-  .7015
+ys = scale(Ytrain)
+betaHat <- Variable(p-1)
+objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2))
+constraint <- list(sum(abs(betaHat)) <=  t)
+problem <- Problem(objective, constraint)
+result <- solve(problem)
+d <- sqrt(diag(var(Xtrain)))
+bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
+round(1000*bl)/1000
+```
+Where the intercept is defined as:
+```{r}
+#intercept of the lasso
+mean(Ypred-(Xtrain %*%bl))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+b1 <-lm(formula = lpsa ~. , data = data)
+df <- as.data.frame(cbind(Xtrain,Ytrain))
+b2 <-lm(Ytrain~Xtrain[,1]+Xtrain[,2], data=df)
+#b3 <-lsfit(Ytrain~., data=df)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(leaps)
+best.subset <- regsubsets(Ytrain~., df)
+best.subset.summary <- summary(best.subset)
+best.subset.summary$outmat
+```
+
+```{r}
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)
+#best.subset.by.adjr2
+
+best.subset.by.cp <- which.min(best.subset.summary$cp)
+#best.subset.by.cp
+
+best.subset.by.bic <- which.min(best.subset.summary$bic)
+#best.subset.by.bic
+```
+
+We choose two explanatory variables and hence we stick with the model that uses lcavol and lweight to predict y (lpsa)
+```{r}
+par(mfrow=c(2,2))
+plot(best.subset$rss, xlab="Number of Variables", ylab="RSS", type="l")
+plot(best.subset.summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq", type="l")
+points(best.subset.by.adjr2, best.subset.summary$adjr2[best.subset.by.adjr2], col="red", cex =2, pch =20)
+plot(best.subset.summary$cp, xlab="Number of Variables", ylab="CP", type="l")
+points(best.subset.by.cp, best.subset.summary$cp[best.subset.by.cp], col="red", cex =2, pch =20)
+plot(best.subset.summary$bic, xlab="Number of Variables", ylab="BIC", type="l")
+points(best.subset.by.bic, best.subset.summary$bic[best.subset.by.bic], col="red", cex =2, pch =20)
+```
+```{r}
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)
+best.subset.by.adjr2
+best.subset.by.cp <- which.min(best.subset.summary$cp)
+best.subset.by.cp
+best.subset.by.bic <- which.min(best.subset.summary$bic)
+best.subset.by.bic
+```
+
+```{r}
+#data <- read.table("prostate.data",
+#                   sep = "")
+
+data[32,2] = 3.8044  # strange science 
+
+X <- scale(data[,1:8])
+Y <- as.matrix(data[,"lpsa"])
+
+Xtrain <- X[data[["train"]], ]
+Ytrain <- Y[data[["train"]],]
+
+Xtest <- X[!data[["train"]], ]
+Ytest <- Y[!data[["train"]], ]
+
+Xtrainscale <- scale(Xtrain)
+C <- cov(as.matrix(Xtrainscale))
+
+Xtrainone <- cbind(array(1, dim = c(nrow(Xtrain),1)),
+                         Xtrain)
+
+b <- solve(t(Xtrainone) %*% Xtrainone,
+           t(Xtrainone) %*% Ytrain)
+
+Ypred <- Xtrainone %*% b
+err <- Ytrain - Ypred
+
+sig2 <- (t(err) %*% err)/ (nrow(Xtrainone) - ncol(X) -1)
+v <- diag(solve(t(Xtrainone) %*% Xtrainone))
+stderr <- sqrt(as.vector(sig2)) * sqrt(v)
+
+Z <- b/stderr
+table32 <- cbind(b,stderr,Z)
+round(100*table32)/100
+
+# CVXR: An R Package for Disciplined Convex Optimization
+# check if the package works
+p <- 9
+betaHat <- Variable(p)
+objective <- Minimize(sum((Ytrain  - Xtrainone %*% betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+bo <- result$getValue(betaHat)
+round(1000*bo)/1000
+round(1000*b)/1000
+
+# The Lasso
+t <-  .7015
+ys = scale(Ytrain)
+betaHat <- Variable(p-1)
+objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2))
+constraint <- list(sum(abs(betaHat)) <=  t)
+problem <- Problem(objective, constraint)
+result <- solve(problem)
+
+d <- sqrt(diag(var(Xtrain)))
+bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
+round(1000*bl)/1000
+
+
+```
+
+
+```{r}
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)
+best.subset.by.adjr2
+best.subset.by.cp <- which.min(best.subset.summary$cp)
+best.subset.by.cp
+best.subset.by.bic <- which.min(best.subset.summary$bic)
+best.subset.by.bic
+par(mfrow=c(2,2))
+plot(best.subset$rss, xlab="Number of Variables", ylab="RSS", type="l")
+plot(best.subset.summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq", type="l")
+points(best.subset.by.adjr2, best.subset.summary$adjr2[best.subset.by.adjr2], col="red", cex =2, pch =20)
+plot(best.subset.summary$cp, xlab="Number of Variables", ylab="CP", type="l")
+points(best.subset.by.cp, best.subset.summary$cp[best.subset.by.cp], col="red", cex =2, pch =20)
+plot(best.subset.summary$bic, xlab="Number of Variables", ylab="BIC", type="l")
+points(best.subset.by.bic, best.subset.summary$bic[best.subset.by.bic], col="red", cex =2, pch =20)
+
+```
+
