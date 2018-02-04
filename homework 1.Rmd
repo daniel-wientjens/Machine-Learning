@@ -122,7 +122,6 @@ plot(best.subset.summary$bic, xlab="Number of Variables", ylab="BIC", type="l")
 points(best.subset.by.bic, best.subset.summary$bic[best.subset.by.bic], col="red", cex =2, pch =20)
 plot(best.subset.summary$cp, xlab="Number of Variables", ylab="CP", type="l")
 points(best.subset.by.cp, best.subset.summary$cp[best.subset.by.cp], col="red", cex =2, pch =20)
-
 ```
 Next we use the same method employed during the LS model to find our coefficients only this time we use just the two explanatory variables the best subset model gave us.
 ```{r}
@@ -175,7 +174,7 @@ br <- round(br,3)
 
 ```{r}
 train <- as.data.frame(cbind(Ytrain, Xtrain))
-pcr_model <- pcr(Ytrain ~ ., data = train)
+pcr_model <- pcr(Ytrain ~ ., data = train, validation = "CV")
 
 PCR <- as.matrix(pcr_model$coefficients[49:56])
 PCR <- round(rbind(mean(Ytrain), PCR),3)
@@ -192,12 +191,39 @@ PLS <- round(rbind(mean(Ytrain), PLS),3)
 PLS
 ```
 
+**Computing the test error**
+
+```{r}
+error <- function(mod){
+  # We need to add the intercept, not multiply it
+  Yhattest <- Xtest %*% mod[-1] + mod[1]
+  Error <- Ytest - Yhattest
+  # Testing error
+  testError <- sum((Error)^2)/nrow(Xtest)
+  # Training error
+  stdError <- sd((Error)^2)/sqrt(nrow(Xtest))
+
+  round(rbind(testError, stdError),3)
+}
+```
+
+```{r}
+#Adding the test and std error to each model
+bo <- rbind(bo,error(bo))
+bb <- rbind(bb, error(bb))
+br <- rbind(br, error(br))
+bl <- rbind(bl, error(bl))
+PCR <- rbind(PCR, error(PCR))
+PLS <- rbind(PLS, error(PLS))
+```
+
 
 **Making the table**
 ```{r}
 table <- cbind(bo,bb,br,bl,PCR,PLS)
 colnames(table) <- c('LS', '  Best Subset', '   Ridge', '   Lasso', '     PCR', '     PLS')
 rownames(table)[1] <- c('Intercept')
+rownames(table)[2:9] <- colnames(data)[1:8]
 table
 ```
 
@@ -224,21 +250,12 @@ table
 
 
 # error calculation
+
+
+
 ```{r}
-error <- function(hat){
-  # We need to add the intercept, not multiply it
-  # Testing error
-  Yhattest <- hat[-1] %*% t(Xtest) + hat[1]
-  testError <- sum((Ytest - Yhattest)^2)/dim(Xtest)[1]
-  # Training error
-  Yhattrain <- hat[-1] %*% t(Xtrain) + hat[1]
-  trainError <- sum((Ytrain - Yhattrain)^2)/dim(Xtrain)[1]
-  
-  cbind(testError, trainError)
-}
+error(bo)
 ```
-
-
 
 
 
