@@ -158,29 +158,46 @@ result <- solve(problem)
 
 d <- sqrt(diag(var(Xtrain)))
 bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
-bl <- round(rbind(mean(Ytrain),bl),3)
-
+bl <- round(rbind(mean(Ypred-(Xtrain %*% bl)),bl),3)
 ```
 
 
 **Ridge column**
 ```{r}
-br <- solve(t(Xtrain) %*% Xtrain + diag(x = 24, ncol(Xtrain)), t(Xtrain) %*% (Ytrain - mean(Ytrain)))
+Xtraincen <- Xtrain-mean(Xtrain)
+br <- solve(t(Xtraincen) %*% Xtraincen + diag(x = 24, ncol(Xtraincen)), t(Xtraincen) %*% (Ytrain - mean(Ytrain)))
 br <- rbind(mean(Ytrain),br)
 br <- round(br,3)
 ```
 
 
+**PCR column**
+
 ```{r}
-#ridge
-br
-#LS
-bo
-#lasso
-bl
-#Best subset
-bb
-table <- cbind(bo,bb,br,bl)
+train <- as.data.frame(cbind(Ytrain, Xtrain))
+pcr_model <- pcr(Ytrain ~ ., data = train)
+
+PCR <- as.matrix(pcr_model$coefficients[49:56])
+PCR <- round(rbind(mean(Ytrain), PCR),3)
+PCR
+```
+
+**PLS column**
+```{r}
+train <- as.data.frame(cbind(Ytrain, Xtrain))
+pls_model <- plsr(Ytrain ~ ., data = train)
+
+PLS <- as.matrix(pls_model$coefficients[9:16])
+PLS <- round(rbind(mean(Ytrain), PLS),3)
+PLS
+```
+
+
+**Making the table**
+```{r}
+table <- cbind(bo,bb,br,bl,PCR,PLS)
+colnames(table) <- c('LS', '  Best Subset', '   Ridge', '   Lasso', '     PCR', '     PLS')
+rownames(table)[1] <- c('Intercept')
 table
 ```
 
