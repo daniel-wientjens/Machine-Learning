@@ -9,9 +9,10 @@ output:
 library(CVXR)
 library(leaps)
 library(ggplot2)
+library(pls)
 library(caret)
 ```
-**Ex 1.**
+#Ex 1.
 1.
 a) Reading in the data
 ```{r}
@@ -37,12 +38,14 @@ Xtrain <- X[data[["train"]], ]
 Ytrain <- Y[data[["train"]], ]
 
 Xtest <- X[!data[["train"]], ]
-Ytest <- Y[!data[["train"]], ] %>% as.matrix()
+Ytest <- Y[!data[["train"]], ] 
 ```
 
 **2. Compute the correlations of predictors in the prostate cancer data as presented Table 3.1**
 ```{r}
 Xtrainscale <- scale(Xtrain)
+#Needed for later excersizes
+Ytrainscale <- scale(Ytrain) 
 C <- cov(as.matrix(Xtrainscale))
 ```
 3. Reproduce the results presented Table 3.2
@@ -79,10 +82,12 @@ round(100*table32)/100
 ```
 
 
-**Ex 2.**
+#Ex 2.
 Reproduce Table 3.3, at least the first four columns that is LS, Best Subset, Ridge and Lasso.
 
-**LS column**
+First we use the CVXR package to calculate the coefficients found in table 3.3, to find these values we have to pose a problem and the constraints and solve them under a least-squares method of calculating a solution. This is then compared to the value obtained by running a linear regression on all the available regressors to check if we indeed get the same values.
+As with a least-squares methods we try to minimize the difference between the predicted data of our model and the actual data in the training set.
+#LS column
 ```{r}
 # CVXR: An R Package for Disciplined Convex Optimization
 p <- 9
@@ -96,7 +101,8 @@ cbind((round(1000*bo)/1000),(round(1000*b)/1000))
 ```
 
 
-**Best subset column**
+#Best subset column
+Finding the best subset can be done in several different methods ranging from forward and backward elimination to sequential replacement. We have chosen for the exhaustive search method though.
 ```{r}
 #Here we use the leaps package to find the best subset using an exhaustive search
 df <- as.data.frame(cbind(Xtrain,Ytrain))
@@ -105,12 +111,23 @@ best.subset.summary <- summary(best.subset)
 best.subset.summary$outmat
 ```
 Since we already know that we only need two explanatory variables we use 'lcavol' and 'lweight' according to the table since they have the stars in the second row.
+For good measure we calculate the solution with the CVXR package method as well as the least squares method to check if we get the same results again.
+We take p to be 3 since we want two explanatory variables and the intercept.
+```{r}
+p <- 3
+betaHat <- Variable(p)
+objective <- Minimize(sum((Ytrain  - Xtrainone[,1:3] %*% betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+bb <- result$getValue(betaHat)
+bb
+```
 
 Just to be sure we should only use two explanatory variables we can check some information criteria.
 
+The adjusted R^2 shows us that it is maximized when we choose 7 variables and explains 66% of the variance, if we choose only 2 explanatory variables we explain roughly 60% of the variance. The added 6% of explained variance is not worth the complexity that the 7 explanatory variable regression model bring with it, if we just two regressors we explain only a bit less but have a much simpeler model which is easier to interprete.
+Then looking at Mallow's CP since we use a least-square method once we found the best variables, here we also see that it defines the best subset model as the one containing 7 explanatory variables. But since we have 8 parameters in the full model we can say that there was a sampling error and hence we disregard this IC.
 In the end we choose the Bayesian Information Criterion and indeed we can see below that we only need two explanatory variables since it minimizes the BIC.
-The adjusted R^2 shows us that it is maximized when we choose 7 variables and explains 66% of the variance, if we choose only 2 explanatory variables we explain roughly 60% of the variance with the benefit of a lot less complexity due to only having 2 variables hence we choose 2 variables as the best subset model.
-Lastly looking at Mallow's CP since we use LS once we found the best variables, here we also see that it defines the best subset model as the one containing 7 explanatory variables. But since we have 8 parameters in the full model we can say that there was a sampling error and hence we disregard this.
 
 ```{r}
 best.subset.by.bic <- which.min(best.subset.summary$bic)
@@ -129,14 +146,6 @@ points(best.subset.by.cp, best.subset.summary$cp[best.subset.by.cp], col="red", 
 Next we use the same method employed during the LS model to find our coefficients only this time we use just the two explanatory variables the best subset model gave us.
 
 ```{r}
-p <- 3
-betaHat <- Variable(p)
-Xtrainone <- Xtrainone[,1:3]
-objective <- Minimize(sum((Ytrain  - Xtrainone %*% betaHat)^2))
-problem <- Problem(objective)
-result <- solve(problem)
-bb <- result$getValue(betaHat)
-
 #Lastly we compare the found bb model with the lm1 model which used a linear regression on only the two explanatory variables found
 lm1 <- lm(Ytrain ~Xtrain[,1:2])
 comp <-cbind(bb,lm1$coefficients)
@@ -144,23 +153,41 @@ round(1000*comp)/1000
 bb <- round(rbind(bb, 0, 0, 0, 0, 0, 0),3)
 ```
 
-**Ridge column**
+#Ridge column
+First we have to centre the data since it is adviced in the book 'Elements of Statistical Learning'. The lambda penalty term is taken to be 24 from the partial solution given in the matlab code.
 ```{r}
-#First off we centre the Xtrain data to account for the centration
+#First off we centre the Xtrain data to account for the splitting of the dataset into test and train
 Xtraincen <- Xtrain-mean(Xtrain)
-br <- solve(t(Xtraincen) %*% Xtraincen + diag(x = 24, ncol(Xtraincen)), t(Xtraincen) %*% (Ytrain - mean(Ytrain)))
+lambda <- 24
+#p get set back to 8 since we want to use all the regressors available in the model
+p<- 8
+#Here our constraint has changed into minimizing the difference between the centred and scaled Ytraining data and the predicted Y training data while taking the penalty term into account
+betaHat <- Variable(p)
+objective <- Minimize(sum(((Ytrainscale-mean(Ytrainscale)) - Xtrainscale %*% betaHat)^2) + lambda*sum((betaHat)^2))
+problem <- Problem(objective)
+result <- solve(problem)
+d <- sqrt(diag(var(Xtrainscale)))    
+br <- round(rbind(mean(Ytrain),result$getValue(betaHat)*sqrt(var(Ytrain)) / d),3)
+br
+```
+
+Unfortunately we do not obtain the correct values of the coefficients found in the table. Next we check if we get the same values when we use the 'normal' method to get the solution and we indeed get a lot closer.
+
+```{r}
+br <- solve(t(Xtraincen) %*% Xtraincen + diag(x = lambda, ncol(Xtraincen)), t(Xtraincen) %*% (Ytrain - mean(Ytrain)))
 br <- rbind(mean(Ytrain),br)
 br <- round(br,3)
+br
 ```
 
 
-**The Lasso**
+#The Lasso
+Again it is smart to use the scaled data. And remember that p is set to 8 from the ridge computation, this is used here again since the Ridge and Lasso method are very closely related. The only difference is that the regularisation term in the lasso computation is set to be an absolut value. This small adjustment has big consequences for the outcomes which can be seen in table 3.3
 ```{r}
-Xtrainscale <- scale(Xtrain)
-
+#the value for t is taken from the solution provided in matlab code
 t <-  .7015
 ys = scale(Ytrain)
-betaHat <- Variable(dim(Xtrainscale)[2])
+betaHat <- Variable(p)
 objective <- Minimize(sum((ys - Xtrainscale %*% betaHat)^2))
 constraint <- list(sum(abs(betaHat)) <=  t)
 problem <- Problem(objective, constraint)
@@ -169,12 +196,12 @@ result <- solve(problem)
 d <- sqrt(diag(var(Xtrain)))
 bl <- result$getValue(betaHat)*sqrt(var(Ytrain)) / d
 bl <- round(rbind(mean(Ypred-(Xtrain %*% bl)),bl),3)
+bl
 ```
 
 
 
-**PCR column**
-
+#PCR column
 ```{r}
 train <- as.data.frame(cbind(Ytrain, Xtrain))
 pcr_model <- pcr(Ytrain ~ ., data = train, validation = "CV")
@@ -184,7 +211,7 @@ PCR <- round(rbind(mean(Ytrain), PCR),3)
 PCR
 ```
 
-**PLS column**
+#PLS column
 ```{r}
 train <- as.data.frame(cbind(Ytrain, Xtrain))
 pls_model <- plsr(Ytrain ~ ., data = train)
@@ -194,19 +221,19 @@ PLS <- round(rbind(mean(Ytrain), PLS),3)
 PLS
 ```
 
-**Computing the test error**
-
+#Computing the test error
+In order to calculate the error per model in a quick manner I made a function where one can put the coefficients per model to obtain the test error and the std error.
 ```{r}
 error <- function(mod){
-  # We need to add the intercept, not multiply it
+#Here we multiply the test set with the found coefficients except the intercept, which we add immediately later after that
   Yhattest <- Xtest %*% mod[-1] + mod[1]
-  Error <- Ytest - Yhattest
-  # Testing error
-  testError <- sum((Error)^2)/nrow(Xtest)
-  # Training error
-  stdError <- sd((Error)^2)/sqrt(nrow(Xtest))
+  error <- Ytest - Yhattest
+#Definition of Testing error
+  test_error <- sum((error)^2)/nrow(Xtest)
+#Definition of Std error
+  std_error <- sd((error)^2)/sqrt(nrow(Xtest))
 
-  round(rbind(testError, stdError),3)
+  round(rbind(test_error, std_error),3)
 }
 ```
 
@@ -221,7 +248,7 @@ PLS <- rbind(PLS, error(PLS))
 ```
 
 
-**Making the table**
+#Making the table
 ```{r}
 table <- cbind(bo,bb,br,bl,PCR,PLS)
 colnames(table) <- c('LS', '  Best Subset', '   Ridge', '   Lasso', '     PCR', '     PLS')
@@ -230,6 +257,9 @@ rownames(table)[2:9] <- colnames(data)[1:8]
 table
 ```
 
+
+
+#Attempt to justify lambda = 24 in the ridge column with cross-validation
 **Ridge**
 ```{r}
 find_l <- function(lambda, Y, X){
@@ -251,7 +281,16 @@ colnames(datf)[1]<-'x'
 pl <- ggplot(datf, aes(x,mse)) + geom_line()
 pl
 ```
+Here we have found that the mse is minimized when a lambda of 14 is used which actually provides a better fit than the model proposed in for ridge in table 3.3
+```{r}
+mse <- sum((Ytest - Xtestone %*% find_l(14, Ytrain, Xtrain))^2)/nrow(Xtestone)
+mse
+mse <- sum((Ytest - Xtestone %*% find_l(24, Ytrain, Xtrain))^2)/nrow(Xtestone)
+mse
+```
 
+Next a CV is attempted because maybe lambda = 14 is the best lambda because the way the data is split.
+Unfortunately this is where I got stuck on the fact that all my training sets propose a lambda of 1.
 ```{r}
 library(caret)
 library(dplyr)
@@ -277,44 +316,9 @@ for(fold in 1:10){
   for(lambda in 1:30){
   mse[lambda]  <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
   }
-  #print(which.min(mse[]))
-  print(mse[])
+  print(which.min(mse[]))
+  #print(mse[])
 }
 ```
 
-```{r}
-ridge <- function(Y,X,lambda){
-  p <- 9
-  beta_hat <- Variable(p-1)
-  objective <- sum((scale(Y) - scale(X) %*% beta_hat)^2) + lambda*sum((beta_hat)^2)
-  problem <- Problem(Minimize(objective))
-  result <- solve(problem)
-  
-  d <- sqrt(diag(var(X)))
-  b <- result$getValue(beta_hat)*sqrt(var(Y)) / d
-  #b <- result$getValue(beta_hat)
-  return(rbind(mean(Y),b))
-}
-```
-
-
-
-```{r}
-train_predictors <- predictors[train_set, ]
-train_classes <- classes[train_set]
-test_predictors <- predictors[-train_set, ]
-test_classes <- classes[-train_set]
- 
-set.seed(seed)
-cv_splits <- createFolds(data, k = 10, returnTrain = TRUE)
-str(cv_splits)
-cv_splits$Fold01
-
-```
-```{r}
-for(lambda in 1:30){
-  mse[lambda]  <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
-  }
-print(which.min(mse[]))
-```
 
