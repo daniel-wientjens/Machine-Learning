@@ -9,6 +9,7 @@ output:
 library(CVXR)
 library(leaps)
 library(ggplot2)
+library(caret)
 ```
 **Ex 1.**
 1.
@@ -36,7 +37,7 @@ Xtrain <- X[data[["train"]], ]
 Ytrain <- Y[data[["train"]], ]
 
 Xtest <- X[!data[["train"]], ]
-Ytest <- Y[!data[["train"]], ]
+Ytest <- Y[!data[["train"]], ] %>% as.matrix()
 ```
 
 **2. Compute the correlations of predictors in the prostate cancer data as presented Table 3.1**
@@ -243,10 +244,77 @@ mse <- vector()
 for (lambda in 1:50) {
   mse[lambda] <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
 }
+which.min(mse)
+
 datf <- as.data.frame(cbind(c(1:50),mse))
 colnames(datf)[1]<-'x'
 pl <- ggplot(datf, aes(x,mse)) + geom_line()
 pl
 ```
 
+```{r}
+library(caret)
+library(dplyr)
+folds <- createFolds(data, k = 10, returnTrain = TRUE)
+lambda <- vector()
+
+find_l <- function(lambda, Y, X){
+Xtraincen <- (X - mean(Xtrain)) %>% as.matrix()
+br <- solve(t(Xtraincen) %*% Xtraincen + diag(x = lambda, ncol(Xtraincen)), t(Xtraincen) %*% (Y - mean(Y)))
+br <- rbind(mean(Y),br)
+br
+}
+for(fold in 1:10){
+  # Create the train and test datasets:
+  Xtest <- data[folds[[fold]],-c(9,10)] %>% as.matrix()
+  Xtestone <- cbind(array(1,dim = c(nrow(Xtest),1)), Xtest) %>% as.matrix()
+  Ytest <- data[folds[[fold]],9] %>% as.matrix() %>% as.matrix()
+  Xtrain <- data[-folds[[fold]], -c(9,10)] %>% as.matrix()
+  Ytrain <- data[-folds[[fold]],9] %>% as.matrix()
+  
+  # Find lambda:
+  mse <- vector()
+  for(lambda in 1:30){
+  mse[lambda]  <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
+  }
+  #print(which.min(mse[]))
+  print(mse[])
+}
+```
+
+```{r}
+ridge <- function(Y,X,lambda){
+  p <- 9
+  beta_hat <- Variable(p-1)
+  objective <- sum((scale(Y) - scale(X) %*% beta_hat)^2) + lambda*sum((beta_hat)^2)
+  problem <- Problem(Minimize(objective))
+  result <- solve(problem)
+  
+  d <- sqrt(diag(var(X)))
+  b <- result$getValue(beta_hat)*sqrt(var(Y)) / d
+  #b <- result$getValue(beta_hat)
+  return(rbind(mean(Y),b))
+}
+```
+
+
+
+```{r}
+train_predictors <- predictors[train_set, ]
+train_classes <- classes[train_set]
+test_predictors <- predictors[-train_set, ]
+test_classes <- classes[-train_set]
+ 
+set.seed(seed)
+cv_splits <- createFolds(data, k = 10, returnTrain = TRUE)
+str(cv_splits)
+cv_splits$Fold01
+
+```
+```{r}
+for(lambda in 1:30){
+  mse[lambda]  <- sum((Ytest - Xtestone %*% find_l(lambda, Ytrain, Xtrain))^2)/nrow(Xtestone)
+  }
+print(which.min(mse[]))
+```
 
